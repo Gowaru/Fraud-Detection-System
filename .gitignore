@@ -1,0 +1,48 @@
+# --- Python & Environnement ---
+venv/
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# --- Modèles & Data (MLOps) ---
+# On ignore les gros fichiers .pkl ou .joblib
+# Mais on peut garder le dossier pour la structure
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.pb
+!models/.gitkeep
+
+# --- Métriques & Rapports ---
+metrics/*.json
+metrics/*.png
+metrics/*.csv
+htmlcov/
+.stats
+.coverage
+coverage.xml
+nosetests.xml
+
+# --- Logs & Monitoring ---
+logs/
+*.log
+prometheus_data/
+grafana_data/
+
+# --- Docker ---
+.dockerignore
+# Si vous utilisez des volumes locaux pour les DB ou le monitoring
+docker_volumes/
+
+# --- OS & IDE ---
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# --- DVC (Si vous l'utilisez pour versionner les modèles) ---
+# Ignore les fichiers de cache DVC mais garde les .dvc
+.dvc/cache/
+.dvc/tmp/

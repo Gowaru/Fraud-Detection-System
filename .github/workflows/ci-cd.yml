@@ -1,0 +1,327 @@
+name: MLOps - Fraud Detection CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Réentraînement automatique chaque semaine
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.9'
+  MODEL_REGISTRY: 'models/'
+
+jobs:
+  # Job 1: Tests de qualité du code
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black pylint
+          pip install -r requirements.txt
+      
+      - name: 🔍 Lint with flake8
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: 🎨 Check code formatting
+        run: black --check .
+      
+      - name: 📊 Pylint score
+        run: pylint src/ --exit-zero
+
+  # Job 2: Tests unitaires et d'intégration
+  tests:
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: 🧪 Run unit tests
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
+      
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  # Job 3: Validation des données
+  data-validation:
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install great-expectations pandas-profiling
+      
+      - name: ✅ Validate data schema
+        run: python scripts/validate_data.py
+      
+      - name: 📈 Generate data profiling report
+        run: python scripts/profile_data.py
+
+  # Job 4: Entraînement du modèle
+  train-model:
+    runs-on: ubuntu-latest
+    needs: [tests, data-validation]
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: 🚀 Train model
+        run: python src/train.py
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_EXPERIMENT_NAME: fraud-detection
+      
+      - name: 📊 Log metrics
+        run: |
+          echo "Model trained successfully"
+          cat metrics/metrics.json
+      
+      - name: 💾 Upload model artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: model-artifacts
+          path: |
+            models/
+            metrics/
+          retention-days: 30
+
+  # Job 5: Évaluation et validation du modèle
+  evaluate-model:
+    runs-on: ubuntu-latest
+    needs: train-model
+    outputs:
+      deployment_ready: ${{ steps.check_metrics.outputs.deployment_ready }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: 📥 Download model artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: model-artifacts
+      
+      - name: 📊 Evaluate model performance
+        id: evaluate
+        run: python scripts/evaluate_model.py
+      
+      - name: ✅ Check deployment criteria
+        id: check_metrics
+        run: |
+          PRECISION=$(python -c "import json; print(json.load(open('metrics/metrics.json'))['precision'])")
+          RECALL=$(python -c "import json; print(json.load(open('metrics/metrics.json'))['recall'])")
+          DEPLOYMENT_READY=$(python -c "import json; print(json.load(open('metrics/metrics.json'))['deployment_ready'])")
+          
+          echo "Precision: $PRECISION"
+          echo "Recall: $RECALL"
+          echo "deployment_ready=$DEPLOYMENT_READY" >> $GITHUB_OUTPUT
+          
+          if [ "$DEPLOYMENT_READY" = "True" ]; then
+            echo "✅ Model meets deployment criteria"
+          else
+            echo "⚠️ Model does not meet deployment criteria"
+            exit 1
+          fi
+      
+      - name: 📈 Generate evaluation report
+        run: python scripts/generate_report.py
+      
+      - name: 📤 Upload evaluation report
+        uses: actions/upload-artifact@v3
+        with:
+          name: evaluation-report
+          path: reports/
+
+  # Job 6: Tests de drift des données
+  data-drift-detection:
+    runs-on: ubuntu-latest
+    needs: evaluate-model
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install evidently
+      
+      - name: 🔍 Detect data drift
+        run: python scripts/detect_drift.py
+      
+      - name: ⚠️ Alert on drift
+        if: failure()
+        run: echo "Data drift detected! Model retraining recommended."
+
+  # Job 7: Build Docker image
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: evaluate-model
+    if: needs.evaluate-model.outputs.deployment_ready == 'True'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 📥 Download model artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: model-artifacts
+      
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: 🔐 Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: 🏗️ Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/fraud-detection:latest
+            ${{ secrets.DOCKER_USERNAME }}/fraud-detection:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/fraud-detection:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/fraud-detection:buildcache,mode=max
+
+  # Job 8: Déploiement staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [evaluate-model, build-docker]
+    if: needs.evaluate-model.outputs.deployment_ready == 'True' && github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging-fraud-detection.example.com
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🚀 Deploy to staging
+        run: |
+          echo "Deploying to staging environment..."
+          # Ajoutez ici vos commandes de déploiement (kubectl, helm, etc.)
+      
+      - name: 🧪 Run smoke tests
+        run: python scripts/smoke_tests.py --env staging
+      
+      - name: ✅ Staging deployment successful
+        run: echo "Model deployed to staging"
+
+  # Job 9: Déploiement production
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [evaluate-model, build-docker]
+    if: needs.evaluate-model.outputs.deployment_ready == 'True' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://fraud-detection.example.com
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 🚀 Deploy to production
+        run: |
+          echo "Deploying to production environment..."
+          # Déploiement avec canary ou blue-green strategy
+      
+      - name: 🧪 Run production smoke tests
+        run: python scripts/smoke_tests.py --env production
+      
+      - name: 📊 Enable monitoring
+        run: |
+          echo "Enabling production monitoring..."
+          # Configuration des alertes et monitoring
+      
+      - name: ✅ Production deployment successful
+        run: echo "Model deployed to production"
+      
+      - name: 📢 Send notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Fraud Detection Model deployed to production!'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        if: always()
+
+  # Job 10: Monitoring post-déploiement
+  post-deployment-monitoring:
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: success()
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+      
+      - name: 📊 Setup monitoring dashboards
+        run: |
+          echo "Setting up monitoring dashboards..."
+          python scripts/setup_monitoring.py
+      
+      - name: 🔔 Configure alerts
+        run: |
+          echo "Configuring performance alerts..."
+          python scripts/configure_alerts.py
