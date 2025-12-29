@@ -26,6 +26,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
       
       - name: 📦 Install dependencies
         run: |
@@ -56,6 +57,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
       
       - name: 📦 Install dependencies
         run: |
@@ -86,11 +88,12 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
       
       - name: 📦 Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install great-expectations pandas-profiling
+          pip install great-expectations ydata-profiling
       
       - name: ✅ Validate data schema
         run: python scripts/validate_data.py
@@ -149,6 +152,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
       
       - name: 📦 Install dependencies
         run: pip install -r requirements.txt
@@ -201,6 +205,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
       
       - name: 📦 Install dependencies
         run: |
