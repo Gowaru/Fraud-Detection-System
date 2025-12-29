@@ -23,7 +23,7 @@ orchestré via GitHub Actions et déployé avec Docker.
 ### Installation locale
 ```bash
 # Cloner le repo
-git clone https://github.com/votre-username/fraud-detection.git
+git clone https://github.com/Gowaru/Fraud-Detection-System.git
 cd fraud-detection
 
 # Créer un environnement virtuel
